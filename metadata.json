@@ -1,0 +1,6 @@
+{
+  "name": "Social AI Agent",
+  "description": "Production-ready AI-powered social media management and autonomous agent application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

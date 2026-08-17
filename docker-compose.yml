@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. PostgreSQL 16 Relational Database Engine
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: social-agent-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-social_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_password}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-social_agent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - social-agent-net
+
+  # ---------------------------------------------------------------------------
+  # 2. Social AI Agent Core REST API Service
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: social-agent-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_dev_password}@db:5432/${POSTGRES_DB:-social_agent}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-key-at-least-32-bytes-long-for-turnkey-demo-2026}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ISSUER: ${JWT_ISSUER:-social-agent-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-social-agent-users}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      DISABLE_SERVER_WORKERS: "true"
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
+      RATE_LIMIT_DISABLED: ${RATE_LIMIT_DISABLED:-false}
+      GLOBAL_RATE_LIMIT_MAX: ${GLOBAL_RATE_LIMIT_MAX:-1000}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-100}
+      MUTATION_RATE_LIMIT_MAX: ${MUTATION_RATE_LIMIT_MAX:-60}
+      META_APP_ID: ${META_APP_ID:-2499515240476024}
+      META_APP_SECRET: ${META_APP_SECRET:-meta-app-secret-placeholder}
+      META_REDIRECT_URI: ${META_REDIRECT_URI:-http://localhost:3000/auth/facebook/callback}
+      APP_REDIRECT_SCHEME: ${APP_REDIRECT_SCHEME:-com.example.app}
+    command: sh -c "npm run migrate && npm run seed && npm start"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - social-agent-net
+
+  # ---------------------------------------------------------------------------
+  # 3. Social AI Agent Headless Background Scheduler & Publish Worker Daemon
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: social-agent-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_dev_password}@db:5432/${POSTGRES_DB:-social_agent}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      SCHEDULER_POLL_INTERVAL_MS: ${SCHEDULER_POLL_INTERVAL_MS:-15000}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-10000}
+    command: ["node", "worker.js"]
+    networks:
+      - social-agent-net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  social-agent-net:
+    driver: bridge

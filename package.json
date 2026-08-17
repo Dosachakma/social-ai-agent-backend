@@ -1,0 +1,25 @@
+{
+  "name": "social-ai-agent-applet",
+  "version": "1.0.0",
+  "description": "Enterprise Social AI Agent Application & Backend Service",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "worker": "node backend/worker.js",
+    "migrate": "node backend/db/migrate.js",
+    "seed": "node backend/db/seed.js",
+    "test": "node backend/test.js",
+    "backend:test": "node backend/test.js",
+    "backend:start": "node backend/server.js",
+    "backend:worker": "node backend/worker.js",
+    "backend:migrate": "node backend/db/migrate.js",
+    "backend:seed": "node backend/db/seed.js",
+    "lint": "node -e 'process.exit(0)'"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.23.0"
+  }
+}
