@@ -34,7 +34,6 @@ fun getPlatformColor(platform: PlatformType): Color {
         PlatformType.FACEBOOK -> ColorFacebook
         PlatformType.INSTAGRAM -> ColorInstagram
         PlatformType.TWITTER -> ColorTwitter
-        PlatformType.LINKEDIN -> ColorLinkedIn
         PlatformType.TIKTOK -> ColorTikTok
     }
 }
@@ -45,7 +44,6 @@ fun getPlatformIcon(platform: PlatformType): ImageVector {
         PlatformType.FACEBOOK -> Icons.Default.Public
         PlatformType.INSTAGRAM -> Icons.Default.CameraAlt
         PlatformType.TWITTER -> Icons.Default.AlternateEmail
-        PlatformType.LINKEDIN -> Icons.Default.Share
         PlatformType.TIKTOK -> Icons.Default.VideoLibrary
     }
 }

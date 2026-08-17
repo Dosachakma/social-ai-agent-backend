@@ -41,8 +41,7 @@ sealed interface AppResult<out T> {
 enum class PlatformType(val displayName: String) {
     FACEBOOK("Facebook"),
     INSTAGRAM("Instagram"),
-    TWITTER("X / Twitter"),
-    LINKEDIN("LinkedIn"),
+    TWITTER("X (Twitter)"),
     TIKTOK("TikTok")
 }
 

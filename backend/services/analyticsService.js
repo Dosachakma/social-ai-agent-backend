@@ -72,7 +72,7 @@ class AnalyticsService {
     let totalFollowers = 0;
     const platformBreakdown = [];
 
-    const platforms = ['FACEBOOK', 'INSTAGRAM', 'TWITTER', 'LINKEDIN', 'TIKTOK'];
+    const platforms = ['FACEBOOK', 'INSTAGRAM', 'TWITTER', 'TIKTOK'];
     const accountMap = new Map();
     for (const row of accountsRes.rows) {
       accountMap.set(row.platform.toUpperCase(), row);

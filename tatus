@@ -1,0 +1,41 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/build.gradle.kts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/config/SecurityConfig.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/model/Models.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/model/OAuthModels.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/repository/BrandProfileRepository.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/repository/MockSocialMediaRepository.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/repository/ScheduledPostRepository.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/data/scheduler/SchedulerService.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/components/PlatformBadge.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/navigation/AppNavigation.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/screens/accounts/AccountsViewModel.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/screens/dashboard/DashboardScreen.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/screens/settings/SettingsScreen.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/screens/settings/SettingsViewModel.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/src/main/java/com/example/ui/theme/Color.kt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/server.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/analyticsService.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/test.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/workers/publishWorker.js', LF will be replaced by CRLF the next time Git touches it
+ .env.example                                       |  34 [32m+[m[31m-[m
+ app/build.gradle.kts                               |  18 [32m+[m[31m-[m
+ .../java/com/example/data/config/SecurityConfig.kt |  12 [32m+[m
+ app/src/main/java/com/example/data/model/Models.kt |   3 [32m+[m[31m-[m
+ .../java/com/example/data/model/OAuthModels.kt     |   1 [31m-[m
+ .../data/repository/BrandProfileRepository.kt      | 127 [31m-------[m
+ .../data/repository/MockSocialMediaRepository.kt   |   4 [32m+[m[31m-[m
+ .../data/repository/ScheduledPostRepository.kt     | 348 [32m+++[m[31m-----------------[m
+ .../com/example/data/scheduler/SchedulerService.kt |  33 [32m+[m[31m-[m
+ .../com/example/ui/components/PlatformBadge.kt     |   2 [31m-[m
+ .../com/example/ui/navigation/AppNavigation.kt     |  18 [32m+[m[31m-[m
+ .../ui/screens/accounts/AccountsViewModel.kt       | 172 [32m++++++[m[31m----[m
+ .../ui/screens/dashboard/DashboardScreen.kt        |  28 [32m+[m[31m-[m
+ .../example/ui/screens/settings/SettingsScreen.kt  |  80 [32m++++[m[31m-[m
+ .../ui/screens/settings/SettingsViewModel.kt       |  37 [32m++[m[31m-[m
+ app/src/main/java/com/example/ui/theme/Color.kt    |   1 [31m-[m
+ backend/server.js                                  | 238 [32m++++++++++++[m[31m--[m
+ backend/services/analyticsService.js               |   2 [32m+[m[31m-[m
+ backend/test.js                                    | 364 [32m++++++++++++++++++++[m[31m-[m
+ backend/workers/publishWorker.js                   | 148 [32m++++++++[m[31m-[m
+ 20 files changed, 1076 insertions(+), 594 deletions(-)

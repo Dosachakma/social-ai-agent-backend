@@ -1,19 +1,10 @@
 package com.example.data.repository
 
 import com.example.data.model.*
-import com.example.data.remote.api.SocialStudioApiService
-import com.example.data.remote.mappers.DomainMappers.toCreateRequest
-import com.example.data.remote.mappers.DomainMappers.toDomain
-import com.example.data.remote.mappers.DomainMappers.toSaveRequest
-import com.example.data.remote.mappers.DomainMappers.toUpdateRequest
-import com.example.data.session.SessionManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import java.util.UUID
 
 interface ScheduledPostRepository {
@@ -37,7 +28,7 @@ class MockScheduledPostRepository : ScheduledPostRepository {
         val created = post.copy(
             id = if (post.id.isBlank()) UUID.randomUUID().toString() else post.id
         )
-        postsFlow.value = listOf(created) + postsFlow.value
+        postsFlow.value = postsFlow.value + created
         return AppResult.Success(created)
     }
 
@@ -91,7 +82,7 @@ class MockScheduledPostRepository : ScheduledPostRepository {
             }
         }
         return if (found) AppResult.Success(post) 
-        else AppResult.Error(AgentError("POST_NOT_FOUND", "Post ${post.id} not found"))
+        else AppResult.Error(AgentError("POST_NOT_FOUND", "Post $post not found"))
     }
 
     override suspend fun cancel(id: String): AppResult<Boolean> {
@@ -180,303 +171,48 @@ class MockScheduledPostRepository : ScheduledPostRepository {
                 status = PostStatus.SCHEDULED,
                 approvalState = ActionApprovalState.AWAITING_APPROVAL,
                 hashtags = "#TechLeadership #FounderLog"
+            ),
+            SocialPost(
+                id = "post_seed_3",
+                title = "TikTok Behind The Scenes",
+                content = "A quick look at how our AI agent manages multi-channel queues simultaneously! 📱⚡",
+                targetPlatforms = listOf(PlatformType.TIKTOK, PlatformType.INSTAGRAM),
+                scheduledTime = "Wed 14 at 6:00 PM",
+                scheduledAt = "2026-08-14T18:00:00",
+                timezone = "America/New_York",
+                repeatOption = RecurrenceOption.NONE,
+                requireApproval = false,
+                status = PostStatus.SCHEDULED,
+                approvalState = ActionApprovalState.APPROVED,
+                hashtags = "#TikTokTech #BehindTheScenes"
+            ),
+            SocialPost(
+                id = "post_seed_4",
+                title = "Published Customer Spotlight",
+                content = "See how Acme Corp boosted engagement by 24% using brand memory automation.",
+                targetPlatforms = listOf(PlatformType.FACEBOOK, PlatformType.TWITTER),
+                scheduledTime = "Sun 10 at 12:00 PM",
+                scheduledAt = "2026-08-10T12:00:00",
+                timezone = "America/New_York",
+                publishedAt = "2026-08-10T12:00:00",
+                status = PostStatus.PUBLISHED,
+                approvalState = ActionApprovalState.SUCCESS,
+                platformPublishResults = listOf(
+                    PlatformPublishResult(platform = PlatformType.FACEBOOK, status = ActionApprovalState.SUCCESS, externalPostId = "fb_ext_882"),
+                    PlatformPublishResult(platform = PlatformType.TWITTER, status = ActionApprovalState.SUCCESS, externalPostId = "x_ext_991")
+                )
+            ),
+            SocialPost(
+                id = "post_seed_5",
+                title = "Draft Q&A Announcement",
+                content = "Got questions about social AI scheduling? Drop them in the comments below!",
+                targetPlatforms = listOf(PlatformType.INSTAGRAM),
+                scheduledTime = "Thu 15 at 4:00 PM",
+                scheduledAt = "2026-08-15T16:00:00",
+                timezone = "America/New_York",
+                status = PostStatus.DRAFT,
+                approvalState = ActionApprovalState.PROPOSED
             )
         )
     }
-}
-
-/**
- * Production PostgreSQL-backed Scheduled Post Repository communicating with Node.js API.
- */
-class ProductionScheduledPostRepository(
-    private val apiService: SocialStudioApiService,
-    private val sessionManager: SessionManager = SessionManager.getInstance(),
-    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
-) : ScheduledPostRepository {
-
-    private val _postsFlow = MutableStateFlow<List<SocialPost>>(emptyList())
-
-    init {
-        coroutineScope.launch {
-            refreshPosts()
-        }
-    }
-
-    suspend fun refreshPosts(): AppResult<List<SocialPost>> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        return try {
-            val response = apiService.getPosts(workspaceId)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.data != null) {
-                    val domainPosts = body.data.map { it.toDomain(isDemo = false) }
-                    _postsFlow.value = domainPosts
-                    AppResult.Success(domainPosts)
-                } else {
-                    AppResult.Error(
-                        AgentError(
-                            code = body?.error ?: "FETCH_POSTS_FAILED",
-                            message = body?.message ?: "Failed to retrieve posts."
-                        )
-                    )
-                }
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Error retrieving posts from backend (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error communicating with posts service.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun create(post: SocialPost): AppResult<SocialPost> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        val req = post.toCreateRequest()
-        return try {
-            val response = apiService.createPost(workspaceId, req)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.data != null) {
-                    val createdDomain = body.data.toDomain(isDemo = false)
-                    _postsFlow.value = listOf(createdDomain) + _postsFlow.value
-                    AppResult.Success(createdDomain)
-                } else {
-                    AppResult.Error(
-                        AgentError(
-                            code = body?.error ?: "CREATE_POST_FAILED",
-                            message = body?.message ?: "Failed to create post."
-                        )
-                    )
-                }
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to create post on server (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error creating post.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun getById(id: String): AppResult<SocialPost?> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        return try {
-            val response = apiService.getPostById(workspaceId, id)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.data != null) {
-                    AppResult.Success(body.data.toDomain(isDemo = false))
-                } else {
-                    AppResult.Success(null)
-                }
-            } else if (response.code() == 404) {
-                AppResult.Success(null)
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to fetch post $id (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error fetching post $id.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun getUpcoming(): AppResult<List<SocialPost>> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        return try {
-            val response = apiService.getScheduledPosts(workspaceId)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.data != null) {
-                    val upcoming = body.data.map { it.toDomain(isDemo = false) }
-                    AppResult.Success(upcoming)
-                } else {
-                    AppResult.Error(
-                        AgentError(
-                            code = body?.error ?: "FETCH_SCHEDULED_FAILED",
-                            message = body?.message ?: "Failed to fetch scheduled posts."
-                        )
-                    )
-                }
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to fetch scheduled posts (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error fetching scheduled posts.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun getForDate(dateIso: String): AppResult<List<SocialPost>> {
-        val matches = _postsFlow.value.filter { post ->
-            post.scheduledTime.contains(dateIso, ignoreCase = true) ||
-            (post.scheduledAt != null && post.scheduledAt.contains(dateIso))
-        }
-        return AppResult.Success(matches)
-    }
-
-    override suspend fun updateStatus(
-        id: String,
-        status: PostStatus,
-        approvalState: ActionApprovalState
-    ): AppResult<SocialPost> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        val existing = _postsFlow.value.find { it.id == id }
-            ?: return AppResult.Error(AgentError("POST_NOT_FOUND", "Post with id $id not found"))
-
-        val updated = existing.copy(status = status, approvalState = approvalState)
-        return updatePost(updated)
-    }
-
-    override suspend fun updatePost(post: SocialPost): AppResult<SocialPost> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        val req = post.toUpdateRequest()
-        return try {
-            val response = apiService.updatePost(workspaceId, post.id, req)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.success == true && body.data != null) {
-                    val domainUpdated = body.data.toDomain(isDemo = false)
-                    _postsFlow.value = _postsFlow.value.map { if (it.id == post.id) domainUpdated else it }
-                    AppResult.Success(domainUpdated)
-                } else {
-                    AppResult.Error(
-                        AgentError(
-                            code = body?.error ?: "UPDATE_POST_FAILED",
-                            message = body?.message ?: "Failed to update post."
-                        )
-                    )
-                }
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to update post on server (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error updating post.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun cancel(id: String): AppResult<Boolean> {
-        val existing = _postsFlow.value.find { it.id == id }
-            ?: return AppResult.Error(AgentError("POST_NOT_FOUND", "Post with id $id not found"))
-        val cancelled = existing.copy(
-            status = PostStatus.FAILED,
-            approvalState = ActionApprovalState.CANCELLED,
-            errorMessage = "Post cancelled by user"
-        )
-        val updateRes = updatePost(cancelled)
-        return if (updateRes is AppResult.Success) AppResult.Success(true) else AppResult.Error((updateRes as AppResult.Error).error)
-    }
-
-    override suspend fun delete(id: String): AppResult<Boolean> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        return try {
-            val response = apiService.deletePost(workspaceId, id)
-            if (response.isSuccessful) {
-                _postsFlow.value = _postsFlow.value.filterNot { it.id == id }
-                AppResult.Success(true)
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to delete post (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error deleting post.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override suspend fun saveExecutionResult(
-        postId: String,
-        platformResult: PlatformPublishResult
-    ): AppResult<SocialPost> {
-        val workspaceId = sessionManager.currentWorkspaceId
-        val req = platformResult.toSaveRequest()
-        return try {
-            val response = apiService.savePublishResult(workspaceId, postId, req)
-            if (response.isSuccessful) {
-                // Refresh post to get consolidated publish results
-                val refreshed = getById(postId)
-                if (refreshed is AppResult.Success && refreshed.data != null) {
-                    _postsFlow.value = _postsFlow.value.map { if (it.id == postId) refreshed.data else it }
-                    AppResult.Success(refreshed.data)
-                } else {
-                    AppResult.Error(AgentError("REFRESH_FAILED", "Publish result recorded but post refresh failed."))
-                }
-            } else {
-                AppResult.Error(
-                    AgentError(
-                        code = "HTTP_${response.code()}",
-                        message = "Failed to record publish result (HTTP ${response.code()})"
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            AppResult.Error(
-                AgentError(
-                    code = "NETWORK_ERROR",
-                    message = e.message ?: "Network error recording publish result.",
-                    cause = e
-                )
-            )
-        }
-    }
-
-    override fun getAllAsFlow(): Flow<List<SocialPost>> = _postsFlow.asStateFlow()
 }

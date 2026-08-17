@@ -4,6 +4,8 @@ const socialPostService = require('../services/socialPostService');
 const socialAccountService = require('../services/socialAccountService');
 const publishResultService = require('../services/publishResultService');
 const publishIntentService = require('../services/publishIntentService');
+const metaGraphService = require('../services/metaGraphService');
+const twitterService = require('../services/twitterService');
 const agentLogService = require('../services/agentLogService');
 const { RetryPolicy, ErrorCategory } = require('./retryPolicy');
 
@@ -656,7 +658,8 @@ class PublishWorker {
    * NEVER logs or leaks tokens.
    */
   async defaultPublishPlatform({ platform, post, account, tokens, intent, clientMutationId, idempotencyKey }) {
-    const isMock = process.env.MOCK_PLATFORMS === 'true' || !tokens || !tokens.accessToken;
+    const isLive = process.env.ENABLE_LIVE_META_PUBLISH === 'true' || (process.env.NODE_ENV === 'production' && process.env.MOCK_PLATFORMS !== 'true');
+    const isMock = !isLive || process.env.MOCK_PLATFORMS === 'true' || !tokens || !tokens.accessToken;
 
     if (isMock) {
       const externalPostId = `${platform.toLowerCase()}_pub_${post.id.slice(0, 8)}_${Date.now().toString(16)}`;
@@ -679,21 +682,104 @@ class PublishWorker {
       };
     }
 
-    // Example real Meta Graph API publish (if live token configured)
+    // Real Meta Graph API publish for FACEBOOK Pages
     if (platform === 'FACEBOOK') {
       const pageId = account.platformUserId;
       if (!pageId) {
-        throw { code: 'PLATFORM_CONFIG_ERROR', message: 'Missing Facebook page ID for publishing' };
+        throw { code: 'PLATFORM_CONFIG_ERROR', message: 'Missing Facebook Page ID for publishing' };
       }
-      const externalPostId = `fb_${pageId}_${Date.now()}`;
+      const mediaUrl = (post.mediaUrls && post.mediaUrls[0]) || (post.media && post.media[0]) || post.mediaUrl || null;
+      const message = post.content || post.title || '';
+      
+      const publishResult = await metaGraphService.publishFacebookPost({
+        pageId,
+        pageAccessToken: tokens.accessToken,
+        message,
+        link: post.link || null,
+        mediaUrl
+      });
+
       return {
-        externalPostId,
-        externalPostUrl: `https://facebook.com/${pageId}/posts/${externalPostId}`,
-        metadata: { platform: 'FACEBOOK', clientMutationId }
+        externalPostId: publishResult.externalPostId,
+        externalPostUrl: publishResult.externalPostUrl,
+        metadata: { platform: 'FACEBOOK', clientMutationId, livePublish: true }
       };
     }
 
-    // Generic fallback for other platforms
+    // Real Meta Graph API publish for INSTAGRAM Professional Accounts
+    if (platform === 'INSTAGRAM') {
+      const igUserId = account.platformUserId;
+      if (!igUserId) {
+        throw { code: 'PLATFORM_CONFIG_ERROR', message: 'Missing Instagram User ID for publishing' };
+      }
+      const mediaUrl = (post.mediaUrls && post.mediaUrls[0]) || (post.media && post.media[0]) || post.mediaUrl || null;
+      if (!mediaUrl) {
+        throw { code: 'MEDIA_REQUIRED', message: 'Instagram publishing requires a public image URL' };
+      }
+      const caption = post.content || post.title || '';
+
+      const publishResult = await metaGraphService.publishInstagramMedia({
+        igUserId,
+        accessToken: tokens.accessToken,
+        imageUrl: mediaUrl,
+        caption
+      });
+
+      return {
+        externalPostId: publishResult.externalPostId,
+        externalPostUrl: publishResult.externalPostUrl,
+        metadata: { platform: 'INSTAGRAM', clientMutationId, livePublish: true }
+      };
+    }
+
+    // Real API v2 publish for X / TWITTER
+    if (platform === 'TWITTER') {
+      const message = post.content || post.title || '';
+      let activeAccessToken = tokens.accessToken;
+
+      try {
+        const publishResult = await twitterService.publishTweet({
+          accessToken: activeAccessToken,
+          text: message
+        });
+
+        return {
+          externalPostId: publishResult.externalPostId,
+          externalPostUrl: publishResult.externalPostUrl,
+          metadata: { platform: 'TWITTER', clientMutationId, livePublish: true }
+        };
+      } catch (twErr) {
+        // If token expired and refresh token available, attempt refresh once
+        if (twErr.errorCode === 'TOKEN_EXPIRED' && tokens.refreshToken) {
+          try {
+            const refreshed = await twitterService.refreshAccessToken(tokens.refreshToken);
+            activeAccessToken = refreshed.accessToken;
+            // Update stored tokens
+            if (account && account.id) {
+              await socialAccountService.updateAccount(post.workspaceId || intent?.workspaceId, account.id, {
+                accessToken: refreshed.accessToken,
+                refreshToken: refreshed.refreshToken,
+                tokenStatus: 'VALID'
+              });
+            }
+            const retryPublish = await twitterService.publishTweet({
+              accessToken: activeAccessToken,
+              text: message
+            });
+            return {
+              externalPostId: retryPublish.externalPostId,
+              externalPostUrl: retryPublish.externalPostUrl,
+              metadata: { platform: 'TWITTER', clientMutationId, livePublish: true, refreshed: true }
+            };
+          } catch (refErr) {
+            throw twErr;
+          }
+        }
+        throw twErr;
+      }
+    }
+
+    // Generic fallback for other platforms (e.g. TikTok preview)
     const externalPostId = `${platform.toLowerCase()}_${Date.now()}`;
     return {
       externalPostId,
@@ -707,7 +793,8 @@ class PublishWorker {
    * Checks external platform or mock store for post existence.
    */
   async defaultReconcilePlatform({ platform, post, account, tokens, intent }) {
-    const isMock = process.env.MOCK_PLATFORMS === 'true' || !tokens || !tokens.accessToken;
+    const isLive = process.env.ENABLE_LIVE_META_PUBLISH === 'true' || (process.env.NODE_ENV === 'production' && process.env.MOCK_PLATFORMS !== 'true');
+    const isMock = !isLive || process.env.MOCK_PLATFORMS === 'true' || !tokens || !tokens.accessToken;
 
     if (isMock) {
       const mutationKey = intent?.clientMutationId;
@@ -730,7 +817,48 @@ class PublishWorker {
       }
     }
 
-    // In non-mock mode without live API status check, return NOT_FOUND or INDETERMINATE safely
+    // Real Meta Graph API reconciliation
+    if (platform === 'FACEBOOK' && account && tokens?.accessToken) {
+      const pageId = account.platformUserId;
+      const message = post.content || post.title || '';
+      return await metaGraphService.reconcileFacebookPost({
+        pageId,
+        pageAccessToken: tokens.accessToken,
+        message
+      });
+    }
+
+    if (platform === 'INSTAGRAM' && account && tokens?.accessToken) {
+      const igUserId = account.platformUserId;
+      const caption = post.content || post.title || '';
+      return await metaGraphService.reconcileInstagramPost({
+        igUserId,
+        accessToken: tokens.accessToken,
+        caption
+      });
+    }
+
+    if (platform === 'TWITTER' && account && tokens?.accessToken) {
+      const message = post.content || post.title || '';
+      return await twitterService.reconcileTweet({
+        accessToken: tokens.accessToken,
+        text: message,
+        userId: account.platformUserId
+      });
+    }
+
+    if (platform === 'LINKEDIN' && account && tokens?.accessToken) {
+      const authorUrn = account.platformUserId?.startsWith('urn:li:')
+        ? account.platformUserId
+        : (account.authorUrn || `urn:li:person:${account.platformUserId || 'me'}`);
+      const message = post.content || post.title || '';
+      return await linkedInService.reconcilePost({
+        accessToken: tokens.accessToken,
+        authorUrn,
+        commentary: message
+      });
+    }
+
     return {
       status: 'NOT_FOUND'
     };

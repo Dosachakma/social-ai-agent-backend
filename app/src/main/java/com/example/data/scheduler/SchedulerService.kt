@@ -4,15 +4,23 @@ import com.example.data.model.*
 import com.example.data.notification.MockNotificationService
 import com.example.data.notification.NotificationService
 import com.example.data.remote.SocialPlatformRegistry
+import com.example.data.remote.client.ApiClientProvider
+import com.example.data.remote.dto.CreateAgentLogRequest
+import com.example.data.remote.dto.DtoMappers
+import com.example.data.remote.session.WorkspaceSessionManager
 import com.example.data.repository.MockScheduledPostRepository
 import com.example.data.repository.MockSocialMediaRepository
 import com.example.data.repository.ScheduledPostRepository
 import com.example.data.repository.SocialMediaRepository
 import com.example.data.security.AccountValidationEngine
 import com.example.data.security.AccountValidationResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 interface SchedulerService {
@@ -34,6 +42,7 @@ class DefaultSchedulerService(
 ) : SchedulerService {
 
     private val logsFlow = MutableStateFlow<List<AgentActionLog>>(emptyList())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun schedulePost(post: SocialPost): AppResult<SocialPost> {
         val approvalState = if (post.requireApproval) ActionApprovalState.AWAITING_APPROVAL else ActionApprovalState.APPROVED
@@ -311,14 +320,36 @@ class DefaultSchedulerService(
         error: String? = null,
         metadata: Map<String, String> = emptyMap()
     ) {
+        val isDemo = WorkspaceSessionManager.isDemoMode()
+        val activeEnv = if (isDemo) ExecutionEnvironment.MOCK else ExecutionEnvironment.PRODUCTION
+
         val log = AgentActionLog(
             action = action,
             platform = platform,
             status = status,
             error = error,
-            executionEnvironment = ExecutionEnvironment.MOCK,
+            executionEnvironment = activeEnv,
             metadata = metadata
         )
         logsFlow.value = logsFlow.value + log
+
+        // Persist to backend database in live mode
+        if (!isDemo) {
+            scope.launch {
+                try {
+                    val req = CreateAgentLogRequest(
+                        action = action.name,
+                        platform = platform?.let { DtoMappers.mapPlatformTypeToString(it) },
+                        status = DtoMappers.mapApprovalStateToString(status),
+                        error = error,
+                        executionEnvironment = "PRODUCTION",
+                        metadata = metadata
+                    )
+                    ApiClientProvider.getApiService().createAgentLog(WorkspaceSessionManager.getWorkspaceId(), req)
+                } catch (e: Exception) {
+                    // Non-blocking log persistence
+                }
+            }
+        }
     }
 }

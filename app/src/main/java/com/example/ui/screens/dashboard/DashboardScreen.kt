@@ -337,11 +337,14 @@ private fun DashboardKpiGrid(
     isWide: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val displayConnected = if (connectedCount > 0) connectedCount else 4
-    val displayScheduled = if (scheduledCount > 0) scheduledCount else 3
-    val displayPublished = if (publishedToday > 0) publishedToday else 10
-    val displayReach = if (totalReach > 0) "${totalReach / 1000}K" else "246K"
-    val displayGrowth = if (growthPercent != 0.0) growthPercent else 18.4
+    val isDemo = com.example.data.remote.session.WorkspaceSessionManager.isDemoMode()
+    val displayConnected = if (connectedCount > 0 || !isDemo) connectedCount else 4
+    val displayScheduled = if (scheduledCount > 0 || !isDemo) scheduledCount else 3
+    val displayPublished = if (publishedToday > 0 || !isDemo) publishedToday else 10
+    val displayReach = if (totalReach > 0 || !isDemo) {
+        if (totalReach >= 1000) "${totalReach / 1000}K" else "$totalReach"
+    } else "246K"
+    val displayGrowth = if (growthPercent != 0.0 || !isDemo) growthPercent else 18.4
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -354,8 +357,8 @@ private fun DashboardKpiGrid(
             MetricCard(
                 title = "Connected Channels",
                 value = "$displayConnected Active",
-                subtitle = "FB, IG, LinkedIn, TikTok",
-                trend = "100% Active",
+                subtitle = if (isDemo) "FB, IG, LinkedIn, TikTok" else "$displayConnected configured",
+                trend = if (displayConnected > 0) "100% Active" else "Ready to Connect",
                 icon = Icons.Default.Hub,
                 iconTint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -365,8 +368,8 @@ private fun DashboardKpiGrid(
             MetricCard(
                 title = "Scheduled Queue",
                 value = "$displayScheduled Posts",
-                subtitle = "Next slot: 5:00 PM",
-                trend = "On Schedule",
+                subtitle = if (displayScheduled > 0) "Queue ready" else "No upcoming queue",
+                trend = if (displayScheduled > 0) "On Schedule" else "Idle",
                 icon = Icons.AutoMirrored.Filled.EventNote,
                 iconTint = StatusInfo,
                 modifier = Modifier
@@ -383,7 +386,7 @@ private fun DashboardKpiGrid(
                 title = "Published Today",
                 value = "$displayPublished Delivered",
                 subtitle = "All channels live",
-                trend = "100% Success",
+                trend = if (displayPublished > 0) "100% Success" else "0 Dispatched",
                 icon = Icons.Default.CheckCircleOutline,
                 iconTint = EmeraldTertiary,
                 modifier = Modifier
@@ -981,9 +984,10 @@ private fun DashboardRecentActivity(
     activities: List<ActivityLog>,
     modifier: Modifier = Modifier
 ) {
+    val isDemo = com.example.data.remote.session.WorkspaceSessionManager.isDemoMode()
     val displayActivities = if (activities.isNotEmpty()) {
         activities
-    } else {
+    } else if (isDemo) {
         listOf(
             ActivityLog(
                 id = "act_1",
@@ -1018,6 +1022,8 @@ private fun DashboardRecentActivity(
                 actionType = "Sync"
             )
         )
+    } else {
+        emptyList()
     }
 
     Column(

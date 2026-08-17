@@ -6,7 +6,6 @@ enum class OAuthProvider(val displayName: String) {
     FACEBOOK("Facebook OAuth"),
     INSTAGRAM("Instagram Graph OAuth"),
     TWITTER("X / Twitter OAuth 2.0"),
-    LINKEDIN("LinkedIn OAuth 2.0"),
     TIKTOK("TikTok for Developers OAuth")
 }
 

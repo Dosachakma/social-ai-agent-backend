@@ -45,7 +45,6 @@ val LightCardBorder = Color(0xFF2D2B3F)
 val ColorFacebook = Color(0xFF1877F2)
 val ColorInstagram = Color(0xFFE4405F)
 val ColorTwitter = Color(0xFF1DA1F2)
-val ColorLinkedIn = Color(0xFF0A66C2)
 val ColorTikTok = Color(0xFF00F2FE)
 val ColorYouTube = Color(0xFFFF0000)
 

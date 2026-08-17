@@ -332,12 +332,12 @@ class MockSocialMediaRepository(
     override suspend fun saveConnectedAccount(account: SocialAccount): AppResult<SocialAccount> {
         val currentList = accounts.value.toMutableList()
         val indexByPlatformUser = currentList.indexOfFirst {
-            it.platform == account.platform && it.platformUserId == account.platformUserId
+            it.platform == account.platform && (it.platformUserId == account.platformUserId || it.platformUserId.isNullOrBlank())
         }
         val indexToReplace = if (indexByPlatformUser != -1) {
             indexByPlatformUser
         } else {
-            currentList.indexOfFirst { it.platform == account.platform && !it.isConnected }
+            currentList.indexOfFirst { it.platform == account.platform }
         }
 
         val finalAccount = if (indexToReplace != -1) {

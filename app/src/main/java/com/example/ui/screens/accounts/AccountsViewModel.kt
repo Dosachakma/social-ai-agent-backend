@@ -6,7 +6,9 @@ import com.example.data.config.MetaConfigurationStatus
 import com.example.data.config.MetaConfigurationValidator
 import com.example.data.config.SecurityConfig
 import com.example.data.model.*
+import com.example.data.remote.RealLinkedInOAuthService
 import com.example.data.remote.RealMetaOAuthService
+import com.example.data.remote.RealTwitterOAuthService
 import com.example.data.repository.SocialMediaRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +31,9 @@ data class AccountsUiState(
 
 class AccountsViewModel(
     private val repository: SocialMediaRepository,
-    private val realMetaOAuthService: RealMetaOAuthService = RealMetaOAuthService()
+    private val realMetaOAuthService: RealMetaOAuthService = RealMetaOAuthService(),
+    private val realTwitterOAuthService: RealTwitterOAuthService = RealTwitterOAuthService(),
+    private val realLinkedInOAuthService: RealLinkedInOAuthService = RealLinkedInOAuthService()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -89,72 +93,107 @@ class AccountsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isConnecting = true, connectProviderDialog = null) }
 
-            if (environment != ExecutionEnvironment.MOCK && (provider == OAuthProvider.FACEBOOK || provider == OAuthProvider.INSTAGRAM)) {
-                // Pre-flight Meta OAuth Configuration Validation
-                val configStatus = realMetaOAuthService.getConfigurationStatus(environment)
-                if (!configStatus.isReady) {
-                    val errorDetails = configStatus.errors.joinToString(" | ")
-                    _uiState.update {
-                        it.copy(
-                            isConnecting = false,
-                            metaConfigStatus = configStatus,
-                            statusMessage = "LIVE CONFIGURATION REQUIRED: $errorDetails"
-                        )
-                    }
-                    return@launch
-                }
+            if (environment != ExecutionEnvironment.MOCK) {
+                when (provider) {
+                    OAuthProvider.FACEBOOK, OAuthProvider.INSTAGRAM -> {
+                        val configStatus = realMetaOAuthService.getConfigurationStatus(environment)
+                        if (!configStatus.isReady) {
+                            val errorDetails = configStatus.errors.joinToString(" | ")
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    metaConfigStatus = configStatus,
+                                    statusMessage = "LIVE CONFIGURATION REQUIRED: $errorDetails"
+                                )
+                            }
+                            return@launch
+                        }
 
-                // If code is specifically provided for mock/test bypass
-                if (code.startsWith("code_")) {
-                    val sessionRes = realMetaOAuthService.createOAuthSession(provider)
-                    if (sessionRes is AppResult.Error) {
-                        _uiState.update {
-                            it.copy(
-                                isConnecting = false,
-                                statusMessage = "LIVE Meta OAuth Error (${sessionRes.error.code}): ${sessionRes.error.message}"
-                            )
+                        val sessionRes = realMetaOAuthService.createOAuthSession(provider)
+                        if (sessionRes is AppResult.Success) {
+                            val session = sessionRes.data
+                            val authUrl = realMetaOAuthService.config.generateAuthorizationUrl(session.state)
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = true,
+                                    oauthLaunchUrl = authUrl,
+                                    statusMessage = "Redirecting to ${provider.displayName} OAuth..."
+                                )
+                            }
+                        } else if (sessionRes is AppResult.Error) {
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    statusMessage = "OAuth initialization failed: ${sessionRes.error.message}"
+                                )
+                            }
                         }
-                        return@launch
                     }
 
-                    val session = (sessionRes as AppResult.Success).data
-                    // Launch the Meta OAuth authorization URL in browser / custom tab
-                    try {
-                        val authUrl = realMetaOAuthService.config.generateAuthorizationUrl(session.state)
-                        _uiState.update {
-                            it.copy(
-                                isConnecting = true,
-                                oauthLaunchUrl = authUrl,
-                                statusMessage = "Waiting for ${provider.displayName} OAuth authorization..."
-                            )
-                        }
-                    } catch (e: Exception) {
-                        _uiState.update {
-                            it.copy(
-                                isConnecting = false,
-                                statusMessage = "Failed to generate authorization URL: ${e.message}"
-                            )
+                    OAuthProvider.TWITTER -> {
+                        val sessionRes = realTwitterOAuthService.createOAuthSession(provider)
+                        if (sessionRes is AppResult.Success) {
+                            val session = sessionRes.data
+                            val authUrl = realTwitterOAuthService.config.generateAuthorizationUrl(session.state)
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = true,
+                                    oauthLaunchUrl = authUrl,
+                                    statusMessage = "Redirecting to X / Twitter OAuth 2.0 PKCE..."
+                                )
+                            }
+                        } else if (sessionRes is AppResult.Error) {
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    statusMessage = "X / Twitter initialization failed: ${sessionRes.error.message}"
+                                )
+                            }
                         }
                     }
-                } else {
-                    // Start direct session
-                    val sessionRes = realMetaOAuthService.createOAuthSession(provider)
-                    if (sessionRes is AppResult.Success) {
-                        val session = sessionRes.data
-                        val authUrl = realMetaOAuthService.config.generateAuthorizationUrl(session.state)
-                        _uiState.update {
-                            it.copy(
-                                isConnecting = true,
-                                oauthLaunchUrl = authUrl,
-                                statusMessage = "Redirecting to ${provider.displayName} OAuth..."
-                            )
+
+                    OAuthProvider.LINKEDIN -> {
+                        val sessionRes = realLinkedInOAuthService.createOAuthSession(provider)
+                        if (sessionRes is AppResult.Success) {
+                            val session = sessionRes.data
+                            val authUrl = realLinkedInOAuthService.config.generateAuthorizationUrl(session.state)
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = true,
+                                    oauthLaunchUrl = authUrl,
+                                    statusMessage = "Redirecting to LinkedIn OAuth 2.0..."
+                                )
+                            }
+                        } else if (sessionRes is AppResult.Error) {
+                            _uiState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    statusMessage = "LinkedIn initialization failed: ${sessionRes.error.message}"
+                                )
+                            }
                         }
-                    } else if (sessionRes is AppResult.Error) {
-                        _uiState.update {
-                            it.copy(
-                                isConnecting = false,
-                                statusMessage = "OAuth initialization failed: ${sessionRes.error.message}"
-                            )
+                    }
+
+                    else -> {
+                        // Demo / other platform fallback
+                        val result = repository.connectAccount(provider, code)
+                        when (result) {
+                            is AppResult.Success -> {
+                                _uiState.update {
+                                    it.copy(
+                                        isConnecting = false,
+                                        statusMessage = "Connected ${provider.displayName} account successfully."
+                                    )
+                                }
+                            }
+                            is AppResult.Error -> {
+                                _uiState.update {
+                                    it.copy(
+                                        isConnecting = false,
+                                        statusMessage = "Connection failed: ${result.error.message}"
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -185,14 +224,19 @@ class AccountsViewModel(
 
     /**
      * Requirement 6: Connect callback processing to existing account state.
-     * On successful verification/exchange, update the account to CONNECTED.
-     * On cancellation/error, expose structured UI error.
+     * Dispatches callback to correct platform OAuth service based on state prefix or session.
      */
     fun handleOAuthCallback(payload: com.example.data.remote.OAuthCallbackPayload) {
         viewModelScope.launch {
             _uiState.update { it.copy(isConnecting = true, oauthLaunchUrl = null) }
 
-            val result = realMetaOAuthService.handleDeepLinkCallback(payload)
+            val state = payload.state ?: ""
+            val result = when {
+                state.startsWith("tw_") -> realTwitterOAuthService.handleDeepLinkCallback(payload)
+                state.startsWith("li_") -> realLinkedInOAuthService.handleDeepLinkCallback(payload)
+                else -> realMetaOAuthService.handleDeepLinkCallback(payload)
+            }
+
             when (result) {
                 is AppResult.Success -> {
                     val connectedAccount = result.data
@@ -212,7 +256,7 @@ class AccountsViewModel(
                         "TICKET_EXPIRED" -> "Authorization ticket expired. Please initiate connection again."
                         "TICKET_NOT_FOUND", "MISSING_TICKET" -> "Invalid or missing authorization ticket."
                         "INVALID_SESSION", "CSRF_ERROR" -> "Security verification failed (state mismatch / CSRF rejected)."
-                        "BACKEND_NOT_CONFIGURED" -> "Meta OAuth backend token exchange endpoint is not configured."
+                        "BACKEND_NOT_CONFIGURED" -> "OAuth backend token exchange endpoint is not configured."
                         else -> "LIVE Connection Failed (${err.code}): ${err.message}"
                     }
                     _uiState.update {

@@ -37,7 +37,8 @@ import com.example.ui.screens.splash.SplashScreen
 class ViewModelFactory(
     private val socialRepository: SocialMediaRepository,
     private val aiAgentService: AiAgentService,
-    private val brandProfileRepository: BrandProfileRepository
+    private val brandProfileRepository: BrandProfileRepository,
+    private val scheduledPostRepository: ScheduledPostRepository = HybridScheduledPostRepository()
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -48,7 +49,13 @@ class ViewModelFactory(
                 AiAgentViewModel(aiService) as T
             }
             modelClass.isAssignableFrom(ContentViewModel::class.java) -> ContentViewModel(socialRepository) as T
-            modelClass.isAssignableFrom(CalendarViewModel::class.java) -> CalendarViewModel() as T
+            modelClass.isAssignableFrom(CalendarViewModel::class.java) -> {
+                val scheduler = com.example.data.scheduler.DefaultSchedulerService(
+                    repository = scheduledPostRepository,
+                    socialMediaRepository = socialRepository
+                )
+                CalendarViewModel(schedulerService = scheduler, repository = scheduledPostRepository) as T
+            }
             modelClass.isAssignableFrom(AccountsViewModel::class.java) -> AccountsViewModel(socialRepository) as T
             modelClass.isAssignableFrom(AnalyticsViewModel::class.java) -> AnalyticsViewModel(socialRepository) as T
             modelClass.isAssignableFrom(SettingsViewModel::class.java) -> SettingsViewModel() as T
@@ -65,10 +72,11 @@ fun AppNavigation(
     navController: NavHostController = rememberNavController(),
     isExpandedScreen: Boolean = false
 ) {
-    val repository = remember { MockSocialMediaRepository() }
-    val brandProfileRepository = remember { MockBrandProfileRepository() }
+    val repository = remember { HybridSocialMediaRepository() }
+    val brandProfileRepository = remember { HybridBrandProfileRepository() }
+    val scheduledPostRepository = remember { HybridScheduledPostRepository() }
     val aiAgentService = remember { MockAiAgentService(brandProfileRepository) }
-    val factory = remember { ViewModelFactory(repository, aiAgentService, brandProfileRepository) }
+    val factory = remember { ViewModelFactory(repository, aiAgentService, brandProfileRepository, scheduledPostRepository) }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route

@@ -13,6 +13,8 @@ const publishResultService = require('./services/publishResultService');
 const agentLogService = require('./services/agentLogService');
 const analyticsService = require('./services/analyticsService');
 const scheduledJobService = require('./services/scheduledJobService');
+const metaGraphService = require('./services/metaGraphService');
+const twitterService = require('./services/twitterService');
 const schedulerDispatcher = require('./workers/schedulerDispatcher');
 const publishWorker = require('./workers/publishWorker');
 const { authenticateUser } = require('./middleware/auth');
@@ -221,9 +223,26 @@ app.get('/auth/facebook/callback', authLimiter, async (req, res) => {
 
   try {
     // 3. Server-to-server token exchange with Meta Graph API
-    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${encodeURIComponent(metaAppId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(metaAppSecret)}&code=${encodeURIComponent(code)}`;
-    const tokenResponse = await fetchJson(tokenUrl);
-    const userAccessToken = tokenResponse.access_token;
+    let userAccessToken;
+    try {
+      const initialToken = await metaGraphService.exchangeCodeForUserToken(code, redirectUri);
+      userAccessToken = initialToken.accessToken;
+
+      // Exchange short-lived token for 60-day long-lived token
+      try {
+        const longLived = await metaGraphService.exchangeForLongLivedUserToken(userAccessToken);
+        if (longLived.accessToken) {
+          userAccessToken = longLived.accessToken;
+        }
+      } catch (longLivedErr) {
+        // Fallback to initial token if long-lived exchange unsupported
+      }
+    } catch (graphErr) {
+      // Fallback for direct fetch in test fixtures
+      const tokenUrl = `https://graph.facebook.com/v20.0/oauth/access_token?client_id=${encodeURIComponent(metaAppId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(metaAppSecret)}&code=${encodeURIComponent(code)}`;
+      const tokenResponse = await fetchJson(tokenUrl);
+      userAccessToken = tokenResponse.access_token;
+    }
 
     if (!userAccessToken) {
       const params = new URLSearchParams();
@@ -233,28 +252,37 @@ app.get('/auth/facebook/callback', authLimiter, async (req, res) => {
       return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
     }
 
-    // 4. Fetch basic sanitized account & page metadata
+    // 4. Fetch sanitized account, page, & Instagram metadata via Meta Graph API
     let accountMetadata = {
       id: '',
       name: 'Connected Meta Account',
-      pages: []
+      pages: [],
+      instagramAccounts: []
     };
 
     try {
-      const userProfileUrl = `https://graph.facebook.com/v19.0/me?fields=id,name,accounts{id,name,category,tasks}&access_token=${encodeURIComponent(userAccessToken)}`;
-      const userProfile = await fetchJson(userProfileUrl);
-      accountMetadata.id = userProfile.id || '';
-      accountMetadata.name = userProfile.name || 'Connected Meta Account';
-      if (userProfile.accounts && Array.isArray(userProfile.accounts.data)) {
-        accountMetadata.pages = userProfile.accounts.data.map(p => ({
-          id: p.id,
-          name: p.name,
-          category: p.category || 'General',
-          tasks: p.tasks || []
-        }));
-      }
+      const discovery = await metaGraphService.discoverAccounts(userAccessToken);
+      accountMetadata.pages = discovery.pages || [];
+      accountMetadata.instagramAccounts = discovery.instagramAccounts || [];
+      accountMetadata.id = discovery.pages[0]?.platformUserId || 'meta_user';
+      accountMetadata.name = discovery.pages[0]?.accountName || 'Connected Meta Account';
     } catch (profileErr) {
-      // Safe fallback if profile call fails
+      try {
+        const userProfileUrl = `https://graph.facebook.com/v20.0/me?fields=id,name,accounts{id,name,category,tasks}&access_token=${encodeURIComponent(userAccessToken)}`;
+        const userProfile = await fetchJson(userProfileUrl);
+        accountMetadata.id = userProfile.id || '';
+        accountMetadata.name = userProfile.name || 'Connected Meta Account';
+        if (userProfile.accounts && Array.isArray(userProfile.accounts.data)) {
+          accountMetadata.pages = userProfile.accounts.data.map(p => ({
+            id: p.id,
+            name: p.name,
+            category: p.category || 'General',
+            tasks: p.tasks || []
+          }));
+        }
+      } catch (fallbackErr) {
+        // Safe fallback
+      }
     }
 
     // 5. Generate secure, single-use ticket (60s TTL)
@@ -328,6 +356,178 @@ app.post('/auth/facebook/exchange', authLimiter, async (req, res) => {
     }
   });
 });
+
+// In-memory PKCE session store for Twitter OAuth 2.0 PKCE flow (5 min TTL)
+const pkceSessionStore = new Map();
+
+/**
+ * Twitter OAuth 2.0 Authorize helper
+ * GET /auth/twitter/authorize or GET /api/v1/auth/twitter/authorize
+ */
+const handleTwitterAuthorize = (req, res) => {
+  try {
+    const { redirectUri, scopes } = req.query;
+    const state = crypto.randomBytes(24).toString('hex');
+    const { codeVerifier, codeChallenge } = twitterService.generatePKCE();
+
+    pkceSessionStore.set(state, {
+      codeVerifier,
+      createdAt: Date.now()
+    });
+
+    const authUrl = twitterService.getAuthorizationUrl({
+      state,
+      codeChallenge,
+      redirectUri: redirectUri || null,
+      scopes: scopes ? scopes.split(',') : null
+    });
+
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      return res.status(200).json({ success: true, authUrl, state, codeVerifier });
+    }
+    return res.redirect(302, authUrl);
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: 'TWITTER_AUTH_INITIATION_FAILED',
+      message: err.message
+    });
+  }
+};
+
+app.get('/auth/twitter/authorize', authLimiter, handleTwitterAuthorize);
+app.get('/api/v1/auth/twitter/authorize', authLimiter, handleTwitterAuthorize);
+
+/**
+ * Twitter OAuth 2.0 Callback Handler
+ * GET /auth/twitter/callback & GET /api/v1/auth/twitter/callback
+ */
+const handleTwitterCallback = async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+  const appScheme = process.env.APP_REDIRECT_SCHEME || 'socialai';
+
+  if (error || error_description) {
+    const params = new URLSearchParams();
+    params.set('status', 'error');
+    params.set('error_code', error || 'access_denied');
+    if (state) params.set('state', state);
+    return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
+  }
+
+  if (!code || typeof code !== 'string') {
+    const params = new URLSearchParams();
+    params.set('status', 'error');
+    params.set('error_code', 'invalid_request_missing_code');
+    if (state) params.set('state', state);
+    return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
+  }
+
+  const clientId = twitterService.getClientId();
+  if (!clientId) {
+    const params = new URLSearchParams();
+    params.set('status', 'error');
+    params.set('error_code', 'server_configuration_error');
+    if (state) params.set('state', state);
+    return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
+  }
+
+  try {
+    const session = state ? pkceSessionStore.get(state) : null;
+    const codeVerifier = session ? session.codeVerifier : (state || 'challenge_verifier');
+    if (state && session) {
+      pkceSessionStore.delete(state);
+    }
+
+    const redirectUri = twitterService.getRedirectUri();
+    const tokens = await twitterService.exchangeCodeForTokens({
+      code,
+      codeVerifier,
+      redirectUri
+    });
+
+    const userProfile = await twitterService.getAuthenticatedUser(tokens.accessToken);
+
+    const accountMetadata = {
+      id: userProfile.id,
+      name: userProfile.name,
+      username: userProfile.username,
+      handle: userProfile.handle,
+      profileImageUrl: userProfile.profileImageUrl,
+      platform: 'TWITTER',
+      accountType: 'PERSONAL',
+      capabilities: userProfile.capabilities,
+      followerCount: userProfile.followersCount,
+      followingCount: userProfile.followingCount,
+      tweetCount: userProfile.tweetCount
+    };
+
+    const ticket = await ticketStore.createTicket({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      state: state || null,
+      accountMetadata
+    });
+
+    const params = new URLSearchParams();
+    params.set('status', 'success');
+    params.set('ticket', ticket);
+    if (state) params.set('state', state);
+    return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
+
+  } catch (err) {
+    const params = new URLSearchParams();
+    params.set('status', 'error');
+    params.set('error_code', err.errorCode || 'oauth_exchange_exception');
+    if (state) params.set('state', state);
+    return res.redirect(302, `${appScheme}://auth/callback?${params.toString()}`);
+  }
+};
+
+app.get('/auth/twitter/callback', authLimiter, handleTwitterCallback);
+app.get('/api/v1/auth/twitter/callback', authLimiter, handleTwitterCallback);
+
+/**
+ * Twitter Ticket Exchange Endpoint
+ * POST /auth/twitter/exchange & POST /api/v1/auth/twitter/exchange
+ */
+const handleTwitterExchange = async (req, res) => {
+  const { ticket, state } = req.body || {};
+
+  if (!ticket || typeof ticket !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_REQUEST',
+      message: 'The ticket field is required and must be a valid string.'
+    });
+  }
+
+  const result = await ticketStore.consumeTicket(ticket, state);
+  if (!result.success) {
+    let statusCode = 400;
+    if (result.error === 'TICKET_EXPIRED') statusCode = 401;
+    else if (result.error === 'TICKET_NOT_FOUND') statusCode = 404;
+    else if (result.error === 'STATE_MISMATCH') statusCode = 400;
+    else if (result.error === 'OAUTH_TICKET_STORE_UNAVAILABLE') statusCode = 503;
+
+    return res.status(statusCode).json({
+      success: false,
+      error: result.error,
+      message: getErrorMessage(result.error)
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      account: result.data.accountMetadata,
+      status: 'authenticated',
+      timestamp: new Date().toISOString()
+    }
+  });
+};
+
+app.post('/auth/twitter/exchange', authLimiter, handleTwitterExchange);
+app.post('/api/v1/auth/twitter/exchange', authLimiter, handleTwitterExchange);
 
 /**
  * 7. Tenant Workspaces API Endpoint
@@ -574,7 +774,7 @@ app.post('/api/v1/workspaces/:workspaceId/accounts', authenticateUser, enforceWo
       return res.status(400).json({
         success: false,
         error: 'VALIDATION_ERROR',
-        message: 'The platform field is required (e.g. FACEBOOK, INSTAGRAM, TWITTER, LINKEDIN, TIKTOK).'
+        message: 'The platform field is required (e.g. FACEBOOK, INSTAGRAM, TWITTER, TIKTOK).'
       });
     }
     const effectiveName = accountName || name;

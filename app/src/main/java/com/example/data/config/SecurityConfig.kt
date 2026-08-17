@@ -46,15 +46,27 @@ object SecurityConfig {
     const val META_OAUTH_REDIRECT_URI_ENV = "META_OAUTH_REDIRECT_URI"
     const val META_BACKEND_URL_ENV = "META_BACKEND_URL"
 
+    const val TWITTER_CLIENT_ID_ENV = "TWITTER_CLIENT_ID"
+    const val TWITTER_REDIRECT_URI_ENV = "TWITTER_REDIRECT_URI"
+
     const val DEFAULT_META_APP_ID = "2499515240476024"
     const val DEFAULT_META_BACKEND_URL = "https://social-ai-agent-backend.onrender.com"
     const val DEFAULT_META_REDIRECT_URI = "https://social-ai-agent-backend.onrender.com/auth/facebook/callback"
+
+    const val DEFAULT_TWITTER_CLIENT_ID = "MFF1UGdFTy05VG1QZEhrcmU5clc6MTpjaXA"
+    const val DEFAULT_TWITTER_REDIRECT_URI = "https://social-ai-agent-backend.onrender.com/auth/twitter/callback"
 
     fun isGeminiConfigured(): Boolean = secretsManager.isKeyConfigured(GEMINI_API_KEY_ENV)
 
     fun getMetaAppId(): String? = secretsManager.getSecret(META_APP_ID_ENV) ?: secretsManager.getSecret(FACEBOOK_APP_ID_ENV) ?: DEFAULT_META_APP_ID
 
     fun isMetaConfigured(): Boolean = !getMetaAppId().isNullOrBlank()
+
+    fun getTwitterClientId(): String? = secretsManager.getSecret(TWITTER_CLIENT_ID_ENV) ?: DEFAULT_TWITTER_CLIENT_ID
+
+    fun isTwitterConfigured(): Boolean = !getTwitterClientId().isNullOrBlank()
+
+    fun getTwitterRedirectUri(): String = secretsManager.getSecret(TWITTER_REDIRECT_URI_ENV) ?: DEFAULT_TWITTER_REDIRECT_URI
 
     fun getMetaBackendBaseUrl(): String = secretsManager.getSecret(META_BACKEND_URL_ENV) ?: DEFAULT_META_BACKEND_URL
 
